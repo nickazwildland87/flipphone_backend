@@ -2,7 +2,7 @@
 require('dotenv').config(); // Loads secret keys from .env file
 const express = require('express');
 const { MongoClient } = require('mongodb');
-const cors = require('cors'); // ★ ADDED THIS LINE ★
+const cors = require('cors'); // ★ THIS IS THE FIX ★
 
 // Get the MongoDB connection string from our .env file
 const dbUrl = process.env.DATABASE_URL;
@@ -12,8 +12,8 @@ const app = express();
 const port = 3000; // The port our server will run on
 const client = new MongoClient(dbUrl);
 
-// === ★ ADD THIS LINE TO ENABLE CORS ★ ===
-// This allows your front-end to make requests
+// === ★ THIS LINE ENABLES CORS ★ ===
+// This allows your flipphoneresaleaz.com front-end to make requests
 app.use(cors()); 
 
 // === YOUR 12 PRODUCTS ===
