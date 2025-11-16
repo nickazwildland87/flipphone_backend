@@ -2,22 +2,22 @@
 require('dotenv').config(); // Loads secret keys from .env file
 const express = require('express');
 const { MongoClient } = require('mongodb');
-const cors = require('cors'); // ★ ADDED THIS LINE ★
+const cors = require('cors'); 
+const bcrypt = require('bcryptjs'); // ★ ADDED BCRYPT FOR PASSWORDS ★
 
 // Get the MongoDB connection string from our .env file
 const dbUrl = process.env.DATABASE_URL;
 
 // Create the Express app
 const app = express();
-const port = 3000; // The port our server will run on
+const port = 3000; 
 const client = new MongoClient(dbUrl);
 
-// === ★ ADD THIS LINE TO ENABLE CORS ★ ===
-// This allows your front-end to make requests
-app.use(cors()); 
+// === ★ ADDED MIDDLEWARE ★ ===
+app.use(cors()); // Allow cross-origin requests
+app.use(express.json()); // ★ CRITICAL: This lets Express read JSON from POST requests ★
 
-// === YOUR 12 PRODUCTS ===
-// (This is just here for the /seed route)
+// --- (Your 12 products are still here for the /seed route) ---
 const products = [
     { id: 1, name: "Apple Watch Series 7 45 inch", price: 349.00, image: "images/apple-watch-series7-45-midnight.jpg", rating: "⭐⭐⭐⭐⭐ (128 reviews)", condition: "Like New", badge: "Bestseller", category: "wearables" },
     { id: 2, name: "Bose QC45 White", price: 279.00, image: "images/bose-qc45-white.jpg", rating: "⭐⭐⭐⭐⭐ (94 reviews)", condition: "Excellent", badge: "Popular", category: "audio" },
@@ -33,11 +33,55 @@ const products = [
     { id: 12, name: "Microsoft Surface Pro 8 256GB Platinum Intel I7", price: 899.00, image: "images/surface-pro8-8-256-platinum.jpg", rating: "⭐⭐⭐⭐⭐ (134 reviews)", condition: "Excellent", badge: "Top Pick", category: "tablets", specs: "Intel Core i7, 256GB SSD, 8GB RAM, Windows 11, Touchscreen Display" }
 ];
 
+// === ★ NEW API ROUTE: User Registration ★ ===
+app.post('/api/users/register', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // 1. Check if email and password were provided
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required.' });
+        }
+
+        // 2. Hash the password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // 3. Connect to the database
+        await client.connect();
+        const db = client.db("Cluster0");
+        const usersCollection = db.collection("users"); // New "users" collection
+
+        // 4. Check if user already exists
+        const existingUser = await usersCollection.findOne({ email: email });
+        if (existingUser) {
+            return res.status(409).json({ message: 'User with this email already exists.' });
+        }
+
+        // 5. Create the new user
+        const newUser = {
+            email: email,
+            password: hashedPassword,
+            createdAt: new Date()
+        };
+        await usersCollection.insertOne(newUser);
+
+        res.status(201).json({ message: 'User registered successfully!' });
+
+    } catch (error) {
+        console.error("Failed to register user:", error);
+        res.status(500).send('Error registering user');
+    } finally {
+        await client.close();
+    }
+});
+
+
 // === API ROUTE: Get all products ===
 app.get('/api/products', async (req, res) => {
     try {
         await client.connect();
-        const db = client.db("Cluster0");
+        const db = client.db("Cluster0"); 
         const productsCollection = db.collection("products");
         
         const allProducts = await productsCollection.find({}).toArray();
@@ -96,6 +140,7 @@ app.get('/seed', async (req, res) => {
         await client.close();
     }
 });
+
 
 // === Original Test Routes ===
 app.get('/', (req, res) => {
