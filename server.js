@@ -2,22 +2,22 @@
 require('dotenv').config(); // Loads secret keys from .env file
 const express = require('express');
 const { MongoClient } = require('mongodb');
-const cors = require('cors'); 
-const bcrypt = require('bcryptjs'); // ★ ADDED BCRYPT FOR PASSWORDS ★
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
 
 // Get the MongoDB connection string from our .env file
 const dbUrl = process.env.DATABASE_URL;
 
 // Create the Express app
 const app = express();
-const port = 3000; 
+const port = 3000;
 const client = new MongoClient(dbUrl);
 
-// === ★ ADDED MIDDLEWARE ★ ===
+// === MIDDLEWARE ===
 app.use(cors()); // Allow cross-origin requests
-app.use(express.json()); // ★ CRITICAL: This lets Express read JSON from POST requests ★
+app.use(express.json()); // Allow reading JSON data
 
-// --- (Your 12 products are still here for the /seed route) ---
+// --- PRODUCTS DATA (For Seeding) ---
 const products = [
     { id: 1, name: "Apple Watch Series 7 45 inch", price: 349.00, image: "images/apple-watch-series7-45-midnight.jpg", rating: "⭐⭐⭐⭐⭐ (128 reviews)", condition: "Like New", badge: "Bestseller", category: "wearables" },
     { id: 2, name: "Bose QC45 White", price: 279.00, image: "images/bose-qc45-white.jpg", rating: "⭐⭐⭐⭐⭐ (94 reviews)", condition: "Excellent", badge: "Popular", category: "audio" },
@@ -33,32 +33,27 @@ const products = [
     { id: 12, name: "Microsoft Surface Pro 8 256GB Platinum Intel I7", price: 899.00, image: "images/surface-pro8-8-256-platinum.jpg", rating: "⭐⭐⭐⭐⭐ (134 reviews)", condition: "Excellent", badge: "Top Pick", category: "tablets", specs: "Intel Core i7, 256GB SSD, 8GB RAM, Windows 11, Touchscreen Display" }
 ];
 
-// === ★ NEW API ROUTE: User Registration ★ ===
+// === USER REGISTRATION ROUTE ===
 app.post('/api/users/register', async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // 1. Check if email and password were provided
         if (!email || !password) {
             return res.status(400).json({ message: 'Email and password are required.' });
         }
 
-        // 2. Hash the password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // 3. Connect to the database
         await client.connect();
         const db = client.db("Cluster0");
-        const usersCollection = db.collection("users"); // New "users" collection
+        const usersCollection = db.collection("users");
 
-        // 4. Check if user already exists
         const existingUser = await usersCollection.findOne({ email: email });
         if (existingUser) {
             return res.status(409).json({ message: 'User with this email already exists.' });
         }
 
-        // 5. Create the new user
         const newUser = {
             email: email,
             password: hashedPassword,
@@ -76,17 +71,57 @@ app.post('/api/users/register', async (req, res) => {
     }
 });
 
+// === ★ NEW ROUTE: USER LOGIN ★ ===
+app.post('/api/users/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
 
-// === API ROUTE: Get all products ===
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required.' });
+        }
+
+        await client.connect();
+        const db = client.db("Cluster0");
+        const usersCollection = db.collection("users");
+
+        // 1. Find user by email
+        const user = await usersCollection.findOne({ email: email });
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid email or password.' });
+        }
+
+        // 2. Check password
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Invalid email or password.' });
+        }
+
+        // 3. Success! Return user info (but NOT the password)
+        res.status(200).json({
+            message: 'Login successful',
+            user: {
+                id: user._id,
+                email: user.email
+            }
+        });
+
+    } catch (error) {
+        console.error("Login failed:", error);
+        res.status(500).send('Error logging in');
+    } finally {
+        await client.close();
+    }
+});
+
+
+// === PRODUCTS ROUTES ===
 app.get('/api/products', async (req, res) => {
     try {
         await client.connect();
         const db = client.db("Cluster0"); 
         const productsCollection = db.collection("products");
-        
         const allProducts = await productsCollection.find({}).toArray();
         res.status(200).json(allProducts);
-        
     } catch (error) {
         console.error("Failed to fetch products:", error);
         res.status(500).send('Error fetching products from database');
@@ -95,7 +130,6 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-// === API ROUTE: Get a SINGLE product by its ID ===
 app.get('/api/products/:id', async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
@@ -105,7 +139,6 @@ app.get('/api/products/:id', async (req, res) => {
         await client.connect();
         const db = client.db("Cluster0");
         const productsCollection = db.collection("products");
-        
         const product = await productsCollection.findOne({ id: productId });
         
         if (product) {
@@ -113,7 +146,6 @@ app.get('/api/products/:id', async (req, res) => {
         } else {
             res.status(404).send('Product not found');
         }
-        
     } catch (error) {
         console.error("Failed to fetch single product:", error);
         res.status(500).send('Error fetching product from database');
@@ -122,17 +154,14 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
-// === API ROUTE: One-time "seed" to add products ===
 app.get('/seed', async (req, res) => {
     try {
         await client.connect();
         const db = client.db("Cluster0");
         const productsCollection = db.collection("products");
-        
         await productsCollection.deleteMany({});
         const result = await productsCollection.insertMany(products);
         res.status(201).send(`Successfully inserted ${result.insertedCount} products!`);
-        
     } catch (error) {
         console.error("Failed to seed database:", error);
         res.status(500).send('Error seeding database');
@@ -141,8 +170,6 @@ app.get('/seed', async (req, res) => {
     }
 });
 
-
-// === Original Test Routes ===
 app.get('/', (req, res) => {
   res.send('Hello, your backend server is running!');
 });
@@ -159,7 +186,6 @@ app.get('/testdb', async (req, res) => {
   }
 });
 
-// Start the server
 app.listen(port, () => {
   console.log(`Server is listening on http://localhost:${port}`);
 });
