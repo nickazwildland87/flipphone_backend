@@ -1,11 +1,11 @@
 // Import required packages
-require('dotenv').config(); // Loads secret keys from .env file
+require('dotenv').config();
 const express = require('express');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb'); // ★ ADDED ObjectId ★
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 
-// Get the MongoDB connection string from our .env file
+// Get the MongoDB connection string
 const dbUrl = process.env.DATABASE_URL;
 
 // Create the Express app
@@ -14,8 +14,8 @@ const port = 3000;
 const client = new MongoClient(dbUrl);
 
 // === MIDDLEWARE ===
-app.use(cors()); // Allow cross-origin requests
-app.use(express.json()); // Allow reading JSON data
+app.use(cors());
+app.use(express.json());
 
 // --- PRODUCTS DATA (For Seeding) ---
 const products = [
@@ -33,14 +33,63 @@ const products = [
     { id: 12, name: "Microsoft Surface Pro 8 256GB Platinum Intel I7", price: 899.00, image: "images/surface-pro8-8-256-platinum.jpg", rating: "⭐⭐⭐⭐⭐ (134 reviews)", condition: "Excellent", badge: "Top Pick", category: "tablets", specs: "Intel Core i7, 256GB SSD, 8GB RAM, Windows 11, Touchscreen Display" }
 ];
 
-// === USER REGISTRATION ROUTE ===
+// === ★ NEW: ORDER ROUTES ★ ===
+
+// 1. Save a new order
+app.post('/api/orders', async (req, res) => {
+    try {
+        const orderData = req.body; // Contains cart, total, userId, date
+        
+        if (!orderData.userId || !orderData.cart) {
+            return res.status(400).json({ message: 'Invalid order data' });
+        }
+
+        await client.connect();
+        const db = client.db("Cluster0");
+        const ordersCollection = db.collection("orders"); // New "orders" collection
+
+        const result = await ordersCollection.insertOne(orderData);
+        res.status(201).json({ message: 'Order placed successfully', orderId: result.insertedId });
+
+    } catch (error) {
+        console.error("Failed to save order:", error);
+        res.status(500).send('Error saving order');
+    } finally {
+        await client.close();
+    }
+});
+
+// 2. Get orders for a specific user
+app.get('/api/orders', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+
+        if (!userId) {
+            return res.status(400).json({ message: 'User ID required' });
+        }
+
+        await client.connect();
+        const db = client.db("Cluster0");
+        const ordersCollection = db.collection("orders");
+
+        // Find all orders where the userId matches
+        const userOrders = await ordersCollection.find({ userId: userId }).toArray();
+        res.status(200).json(userOrders);
+
+    } catch (error) {
+        console.error("Failed to fetch orders:", error);
+        res.status(500).send('Error fetching orders');
+    } finally {
+        await client.close();
+    }
+});
+
+
+// === USER AUTH ROUTES (Existing) ===
 app.post('/api/users/register', async (req, res) => {
     try {
         const { email, password } = req.body;
-
-        if (!email || !password) {
-            return res.status(400).json({ message: 'Email and password are required.' });
-        }
+        if (!email || !password) return res.status(400).json({ message: 'Email and password required.' });
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
@@ -50,81 +99,55 @@ app.post('/api/users/register', async (req, res) => {
         const usersCollection = db.collection("users");
 
         const existingUser = await usersCollection.findOne({ email: email });
-        if (existingUser) {
-            return res.status(409).json({ message: 'User with this email already exists.' });
-        }
+        if (existingUser) return res.status(409).json({ message: 'User already exists.' });
 
-        const newUser = {
-            email: email,
-            password: hashedPassword,
-            createdAt: new Date()
-        };
+        const newUser = { email: email, password: hashedPassword, createdAt: new Date() };
         await usersCollection.insertOne(newUser);
 
         res.status(201).json({ message: 'User registered successfully!' });
-
     } catch (error) {
-        console.error("Failed to register user:", error);
         res.status(500).send('Error registering user');
     } finally {
         await client.close();
     }
 });
 
-// === ★ NEW ROUTE: USER LOGIN ★ ===
 app.post('/api/users/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-
-        if (!email || !password) {
-            return res.status(400).json({ message: 'Email and password are required.' });
-        }
+        if (!email || !password) return res.status(400).json({ message: 'Email and password required.' });
 
         await client.connect();
         const db = client.db("Cluster0");
         const usersCollection = db.collection("users");
 
-        // 1. Find user by email
         const user = await usersCollection.findOne({ email: email });
-        if (!user) {
-            return res.status(400).json({ message: 'Invalid email or password.' });
-        }
+        if (!user) return res.status(400).json({ message: 'Invalid credentials.' });
 
-        // 2. Check password
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Invalid email or password.' });
-        }
+        if (!isMatch) return res.status(400).json({ message: 'Invalid credentials.' });
 
-        // 3. Success! Return user info (but NOT the password)
         res.status(200).json({
             message: 'Login successful',
-            user: {
-                id: user._id,
-                email: user.email
-            }
+            user: { id: user._id, email: user.email }
         });
-
     } catch (error) {
-        console.error("Login failed:", error);
         res.status(500).send('Error logging in');
     } finally {
         await client.close();
     }
 });
 
-
-// === PRODUCTS ROUTES ===
+// === PRODUCT ROUTES (Existing) ===
 app.get('/api/products', async (req, res) => {
     try {
         await client.connect();
-        const db = client.db("Cluster0"); 
+        const db = client.db("Cluster0");
         const productsCollection = db.collection("products");
         const allProducts = await productsCollection.find({}).toArray();
         res.status(200).json(allProducts);
     } catch (error) {
-        console.error("Failed to fetch products:", error);
-        res.status(500).send('Error fetching products from database');
+        res.status(500).send('Error fetching products');
     } finally {
         await client.close();
     }
@@ -133,22 +156,17 @@ app.get('/api/products', async (req, res) => {
 app.get('/api/products/:id', async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        if (isNaN(productId)) {
-            return res.status(400).send('Error: Product ID must be a number.');
-        }
+        if (isNaN(productId)) return res.status(400).send('Invalid ID');
+        
         await client.connect();
         const db = client.db("Cluster0");
         const productsCollection = db.collection("products");
         const product = await productsCollection.findOne({ id: productId });
         
-        if (product) {
-            res.status(200).json(product);
-        } else {
-            res.status(404).send('Product not found');
-        }
+        if (product) res.status(200).json(product);
+        else res.status(404).send('Product not found');
     } catch (error) {
-        console.error("Failed to fetch single product:", error);
-        res.status(500).send('Error fetching product from database');
+        res.status(500).send('Error fetching product');
     } finally {
         await client.close();
     }
@@ -161,31 +179,26 @@ app.get('/seed', async (req, res) => {
         const productsCollection = db.collection("products");
         await productsCollection.deleteMany({});
         const result = await productsCollection.insertMany(products);
-        res.status(201).send(`Successfully inserted ${result.insertedCount} products!`);
+        res.status(201).send(`Seeded ${result.insertedCount} products!`);
     } catch (error) {
-        console.error("Failed to seed database:", error);
         res.status(500).send('Error seeding database');
     } finally {
         await client.close();
     }
 });
 
-app.get('/', (req, res) => {
-  res.send('Hello, your backend server is running!');
-});
-
+app.get('/', (req, res) => res.send('Backend is running!'));
 app.get('/testdb', async (req, res) => {
-  try {
-    await client.connect();
-    res.send('Successfully connected to MongoDB!');
-  } catch (error) {
-    console.error(error);
-    res.status(500).send('Error connecting to the database');
-  } finally {
-    await client.close();
-  }
+    try {
+        await client.connect();
+        res.send('Successfully connected to MongoDB!');
+    } catch (error) {
+        res.status(500).send('Database connection failed');
+    } finally {
+        await client.close();
+    }
 });
 
 app.listen(port, () => {
-  console.log(`Server is listening on http://localhost:${port}`);
+    console.log(`Server is listening on http://localhost:${port}`);
 });
